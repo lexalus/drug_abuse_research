@@ -1,0 +1,744 @@
+---
+title: "BeattieAlexandra_final_draft"
+author: "Alexandra Beattie"
+date: "12/4/2017"
+output: word_document
+---
+
+```{r echo=FALSE}
+
+
+library(dplyr)
+library(acs)
+library(stats)
+library(base)
+library(fpc)
+library(ggplot2)    #for graphics and the dataset for this example session
+library(cluster)    #provides more cluster algorithms than base R (e.g. PAM)
+library(useful)     #provides a plot function for clusters and "FitKMeans" and "PlotHartigan" functions
+library(NbClust)    #provides tons of tools for identifying the "right" number of clusters
+library(rgl)        #for 3D rotating plots
+library(dbscan)
+
+##Pull in census data to create census based variables
+
+states = geo.make(state='*')
+
+createRace <- function(endYear) {
+  b03002 <- acs.fetch(geography=states, table.number="B02001", endyear=endYear, span=1)
+  
+  stateRace <- data.frame(cbind(data.frame(b03002@geography), data.frame(b03002@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      percent_white=B02001_002/B02001_001,
+      percent_black=B02001_003/B02001_001,
+      percent_native=B02001_004/B02001_001,
+      percent_asian=B02001_005/B02001_001,
+      percent_pacific = B02001_006/B02001_001,
+      percent_other = B02001_007/B02001_001,
+      percent_mixed = B02001_008/B02001_001
+    )
+  return(stateRace)
+}
+race2012 <- write.csv("Users/lex/race2012.csv")
+race2012 <- createRace('2012')
+race2013 <- createRace('2013')
+race2014 <- createRace('2014')
+race2015 <- createRace('2015')
+
+createAge <- function(endYear) {
+  b01002 <- acs.fetch(geography=states, table.number="B01002", endyear=endYear, span=1)
+  
+  stateAge <- data.frame(cbind(data.frame(b01002@geography), data.frame(b01002@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      median_age=B01002_001
+    )
+  return(stateAge)
+}
+
+age2012 <- createAge('2012')
+age2013 <- createAge('2013')
+age2014 <- createAge('2014')
+age2015 <- createAge('2015')
+
+createPop <- function(endYear) {
+  b01003 <- acs.fetch(geography=states, table.number="B01003", endyear=endYear, span=1)
+  
+  statePop <- data.frame(cbind(data.frame(b01003@geography), data.frame(b01003@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      population=B01003_001
+    )
+  return(statePop)
+}
+
+pop2012 <- createPop('2012')
+pop2013 <- createPop('2013')
+pop2014 <- createPop('2014')
+pop2015 <- createPop('2015')
+
+createAssistance <- function(endYear) {
+  b19067 <- acs.fetch(geography=states, table.number="B19067", endyear=endYear, span=1)
+  
+  stateAssistance <- data.frame(cbind(data.frame(b19067@geography), data.frame(b19067@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      publicAssistance=B19067_001
+    )
+  return(stateAssistance)
+}
+
+assistance2012 <- createAssistance('2012')
+assistance2013 <- createAssistance('2013')
+assistance2014 <- createAssistance('2014')
+assistance2015 <- createAssistance('2015')
+
+createPoverty <- function(endYear) {
+  b17001 <- acs.fetch(geography=states, table.number="B17001", 
+                      variable = "B17001_001", endyear=endYear, span=1)
+  
+  statePoverty <- data.frame(cbind(data.frame(b17001@geography), data.frame(b17001@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      povertyIncome=B17001_001
+    )
+  return(statePoverty)
+}
+
+poverty2012 <- createPoverty('2012')
+poverty2013 <- createPoverty('2013')
+poverty2014 <- createPoverty('2014')
+poverty2015 <- createPoverty('2015')
+
+createIncome <- function(endYear) {
+  b19013 <- acs.fetch(geography=states, table.number="B19013", endyear=endYear, span=1)
+  
+  stateMedianIncome <- data.frame(cbind(data.frame(b19013@geography), data.frame(b19013@estimate))) %>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      medianIncome=B19013_001
+    )
+  return(stateMedianIncome)
+}
+
+income2012 <- createIncome('2012')
+income2013 <- createIncome('2013')
+income2014 <- createIncome('2014')
+income2015 <- createIncome('2015')
+
+
+createUnemploy <- function(endYear) {
+  b23025 <- acs.fetch(geography=states, table.number="B23025", endyear=endYear, span=1)
+  
+  stateUnemployement <- data.frame(cbind(data.frame(b23025@geography), data.frame(b23025@estimate)))%>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      employed=B23025_004/B23025_003,
+      unemployed=B23025_005/B23025_003
+    )
+  return(stateUnemployement)
+}
+
+unemploy2012 <- createUnemploy('2012')
+unemploy2013 <- createUnemploy('2013')
+unemploy2014 <- createUnemploy('2014')
+unemploy2015 <- createUnemploy('2015')
+
+
+createEd <- function(endYear) {
+  c15003 <- acs.fetch(geography=states, table.number="C15003", endyear=endYear, span=1)
+  
+  stateEducation <- data.frame(cbind(data.frame(c15003@geography), data.frame(c15003@estimate)))%>%
+    rowwise() %>% summarize(
+      fips=paste0(state),
+      none=C15003_002/C15003_001,
+      elementary=(C15003_003+C15003_004)/C15003_001,
+      junior =(C15003_005+C15003_006)/C15003_001,
+      hsNoDiploma = (C15003_007+C15003_008+C15003_009)/C15003_001,
+      hsDiploma = C15003_010/C15003_001,
+      ged = C15003_011/C15003_001,
+      someCollege = (C15003_012+C15003_013)/C15003_001,
+      associates = C15003_014/C15003_001,
+      bachelors = C15003_015/C15003_001,
+      masters = C15003_016/C15003_001,
+      professionalDegree = C15003_017/C15003_001,
+      doctorate = C15003_018/C15003_001
+    )
+  return(stateEducation)
+}
+
+ed2012 <- createEd('2012')
+ed2013 <- createEd('2013')
+ed2014 <- createEd('2014')
+ed2015 <- createEd('2015')
+
+
+#USE FOR avg days to wait, main substance admitted and frequency levels for users
+
+#USE FOR # of discharges, avg length of stay, reason for discharge, and priors
+
+#https://www.cdc.gov/drugoverdose/data/statedeaths.html
+#for state related deaths
+
+census2015 <- merge(assistance2015, ed2015)
+census2015 <- merge(census2015, race2015)
+census2015 <- merge(census2015, income2015)
+census2015 <- merge(census2015, pop2015)
+census2015 <- merge(census2015, unemploy2015)
+
+census2014 <- merge(assistance2014, ed2014)
+census2014 <- merge(census2014, race2014)
+census2014 <- merge(census2014, income2014)
+census2014 <- merge(census2014, pop2014)
+census2014 <- merge(census2014, unemploy2014)
+
+census2013 <- merge(assistance2013, ed2013)
+census2013 <- merge(census2013, race2013)
+census2013 <- merge(census2013, income2013)
+census2013 <- merge(census2013, pop2013)
+census2013 <- merge(census2013, unemploy2013)
+
+census2012 <- merge(assistance2012, ed2012)
+census2012 <- merge(census2012, race2012)
+census2012 <- merge(census2012, income2012)
+census2012 <- merge(census2012, pop2012)
+census2012 <- merge(census2012, unemploy2012)
+
+stateCensusList <- c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+                     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+                     "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",
+                     "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+                     "UT", "VT", "VA", "WA", "WV", "WI", "WY", "PR")
+
+census2012 <- cbind(state = stateCensusList, census2012)
+census2013 <- cbind(state = stateCensusList, census2013)
+census2014 <- cbind(state = stateCensusList, census2014)
+census2015 <- cbind(state = stateCensusList, census2015)
+
+##Substance abuse facilities data
+load("/Users/lex/Downloads/N-SSATS-2015-DS0001-bndl-data-r 2/N-SSATS-2015-DS0001-data/N-SSATS-2015-DS0001-data-r.rda")
+load("/Users/lex/Downloads/N-SSATS-2014-DS0001-bndl-data-r/N-SSATS-2014-DS0001-data/N-SSATS-2014-DS0001-data-r.rda")
+load("/Users/lex/Downloads/N-SSATS-2013-DS0001-bndl-data-r/N-SSATS-2013-DS0001-data/N-SSATS-2013-DS0001-data-r.rda")
+load("/Users/lex/Downloads/N-SSATS-2012-DS0001-bndl-data-r/N-SSATS-2012-DS0001-data/N-SSATS-2012-DS0001-data-r.rda")
+
+nsafd2015 <- nssats2015_puf
+nsafd2014 <- nssatpuf_2014
+nsafd2013 <- nssatpuf_2013
+nsafd2012 <- nssatpuf_2012
+
+createNSAFD <- function(dataFrame) {
+  dataFrame[is.na(dataFrame)] <- 0
+  data <- dataFrame[complete.cases(dataFrame),]
+  data <- data[,-1]
+  data[] <- lapply(data, factor)
+  
+  dataMatrix <- model.matrix(STATE~.,data)[,-1]
+  
+  dataDF <- data.frame(dataMatrix)
+  
+  dataDF$state <- data$STATE
+  dataDF$availableService <- 1
+  
+  summedFin <- dataDF %>% group_by(state) %>% summarise_all(funs(sum))
+  
+  return(summedFin)
+}
+
+nsafd2015 <- createNSAFD(nsafd2015)
+nsafd2015$state <- as.factor(nsafd2015$state)
+nsafd2015 <- nsafd2015[-c(11, 13, 42, 43, 51), ]
+nsafd2015$state <- c("AK", "AL", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA", "HI",
+                     "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", 
+                     "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH",
+                     "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA",
+                     "WI", "WV", "WY")
+nsafd2014 <- createNSAFD(nsafd2014)
+nsafd2013 <- createNSAFD(nsafd2013)
+nsafd2012 <- createNSAFD(nsafd2012)
+
+load("/Users/lex/Downloads/TEDSA_2015_PUF")
+load("/Users/lex/Downloads/TEDSA_2014_PUF")
+load("/Users/lex/Downloads/TEDSA_2013_PUF")
+load("/Users/lex/Downloads/TEDSA_2012_PUF")
+
+createTEDSA <- function(dataFrame) {
+  data <- dataFrame[, c("STFIPS", "NOPRIOR", "SUB1", "FREQ1")]
+  data$NOPRIOR <- as.factor(data$NOPRIOR)
+  data$SUB1 <- as.factor(data$SUB1)
+  data$FREQ1 <- as.factor(data$FREQ1)
+  data <- data[complete.cases(data),]
+  dataMatrix <- model.matrix(STFIPS~.,data)[,-1]
+  dataDF <- data.frame(dataMatrix)
+  dataDF$state <- data$STFIPS
+  dataDF$admit <- 1
+  summedFin <- dataDF %>% group_by(state) %>% summarise_all(funs(sum))
+  return(summedFin)
+}
+stateCodes <- read.csv("/Users/lex/Documents/stateCodes.csv")
+
+
+tedsA2014 <- createTEDSA(tedsa_2014)
+tedsA2014 <- merge(stateCodes, tedsA2014)
+tedsA2015 <- createTEDSA(tedsa_2015)
+tedsA2015 <- merge(stateCodes, tedsA2015)
+tedsA2013 <- createTEDSA(tedsa_2013)
+tedsA2013 <- merge(stateCodes, tedsA2013)
+tedsA2012 <- createTEDSA(tedsa_2012)
+tedsA2012 <- merge(stateCodes, tedsA2012)
+
+tedsA2012 <- tedsA2012[,-1]
+tedsA2013 <- tedsA2013[,-1]
+tedsA2014 <- tedsA2014[,-1]
+tedsA2015 <- tedsA2015[,-1]
+
+tedsA2012$state <- tedsA2012$stateAbrev
+tedsA2013$state <- tedsA2013$stateAbrev
+tedsA2014$state <- tedsA2014$stateAbrev
+tedsA2015$state <- tedsA2015$stateAbrev
+
+tedsA2012 <- tedsA2012[,-1]
+tedsA2013 <- tedsA2013[,-1]
+tedsA2014 <- tedsA2014[,-1]
+tedsA2015 <- tedsA2015[,-1]
+
+load("/Users/lex/Downloads/teds_d_2014")
+load("/Users/lex/Downloads/teds_d_2013")
+load("/Users/lex/Downloads/teds_d_2012")
+```
+```{r}
+
+
+
+createTEDSD <- function(dataFrame) {
+  data <- dataFrame[, c("STFIPS", "LIVARAG", "SERVSETD", "REASON",
+                        "LOS", "PSOURCE")]
+  data$LIVARAG <- as.factor(data$LIVARAG)
+  data$SERVSETD <- as.factor(data$SERVSETD)
+  data$REASON <- as.factor(data$REASON)
+  data$LOS <- as.factor(data$LOS)
+  data$PSOURCE <- as.factor(data$PSOURCE)
+  data <- data[complete.cases(data),]
+  dataMatrix <- model.matrix(STFIPS~.,data)[,-1]
+  dataDF <- data.frame(dataMatrix)
+  dataDF$state <- data$STFIPS
+  dataDF$discharge <- 1
+  summedFin <- dataDF %>% group_by(state) %>% summarise_all(funs(sum))
+  return(summedFin)
+}
+
+TEDSDList2014 <- c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC",
+                     "HI", "ID", "IL", "IN", "IA","KY", "LA", "ME", "MD", "MA",
+                     "MI", "MN", "MO", "MT", "NE", "NV", "NH", "NJ", "NY",
+                     "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+                     "UT", "VT", "VA", "WA", "WI", "WY")
+TEDSDList2012 <- c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+                   "HI", "ID", "IL", "IN", "IA","KY", "LA", "ME", "MD", "MA",
+                   "MI", "MN", "MO", "MT", "NE", "NV", "NH", "NJ", "NY",
+                   "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+                   "UT", "VT", "VA", "WA", "WV", "WI", "WY")
+
+TEDSDList2013 <- c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "GA",
+                   "HI", "ID", "IL", "IN", "IA", "KS","KY", "LA", "ME", "MD", "MA",
+                   "MI", "MN", "MO", "MT", "NE", "NV", "NH", "NJ", "NY",
+                   "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+                   "UT", "VT", "VA", "WA", "WV", "WI", "WY")
+#death statistics
+
+deathData20132014 <- read.csv("/Users/lex/Downloads/drug_poisoning_deaths_by_state-_us_2013_2014-v7.csv")
+deathData2013 <- deathData20132014[,c("State", "X2013Number")]
+deathData2013$state <- deathData2013$State
+deathData2013$number <- deathData2013$X2013Number
+deathData2013 <- deathData2013[,-1]
+deathData2014 <- deathData20132014[,c("State", "X2014Number")]
+deathData2014$state <- deathData2014$State
+deathData2014 <- deathData2014[,-1]
+deathData2014$number <- deathData2014$X2014Number
+deathData2015 <- read.csv("/Users/lex/Downloads/2015-death-data.csv")
+deathData2015$state <- deathData2015$State
+deathData2015 <- deathData2015[,-1]
+deathData2015$number <- deathData2015$Number
+deathData2012 <- read.csv("/Users/lex/Downloads/deathdata2012.csv")
+
+
+tedsD2012 <- createTEDSD(teds_d_2012)
+tedsD2013 <- createTEDSD(teds_d_2013)
+tedsD2014 <- createTEDSD(teds_d_2014)
+tedsD2012 <- tedsD2012[-49,]
+tedsD2013 <- tedsD2013[-49,]
+tedsD2014 <- tedsD2014[-46,]
+tedsD2014$state <- TEDSDList2014
+tedsD2014 <- merge(tedsD2014, deathData2014)
+tedsD2013$state <- TEDSDList2013
+tedsD2013 <- merge(tedsD2013, deathData2013)
+tedsD2012$state <- TEDSDList2012
+tedsD2012 <- merge(tedsD2012, deathData2012)
+tedsD2013$deaths <- tedsD2013$number
+tedsD2012$deaths <- tedsD2012$number
+tedsD2014$deaths <- tedsD2014$number
+tedsD2013 <- tedsD2013[, -c(64, 65)]
+tedsD2013 <- merge(census2013, tedsD2013)
+tedsD2012 <- tedsD2012[, -c(65)]
+tedsD2012 <- merge(census2012, tedsD2012)
+tedsD2014 <- tedsD2014[, -c(65,66)]
+tedsD2014 <- merge(census2014, tedsD2014)
+
+
+
+```
+
+```{r}
+
+
+
+
+year2012 <- merge(census2012, deathData2012)
+year2012 <- merge(year2012, tedsA2012)
+year2012 <- merge(year2012, nsafd2012)
+year2012$year <- "2012"
+
+year2013 <- merge(census2013, deathData2013)
+year2013 <- merge(year2013, tedsA2013)
+year2013 <- merge(year2013, nsafd2013)
+year2013$year <- "2013"
+
+year2014 <- merge(census2014, deathData2014)
+year2014 <- merge(year2014, tedsA2014)
+year2014 <- merge(year2014, nsafd2014)
+year2014$year <- "2014"
+
+year2015 <- merge(census2015, deathData2015)
+year2015 <- merge(year2015, tedsA2015)
+year2015 <- merge(year2015, nsafd2015)
+year2015$year <- "2015"
+
+
+```
+```{r}
+library(rpart)
+
+```
+```{r}
+common_cols <- intersect(colnames(year2012), colnames(year2013))
+test <- rbind(
+  subset(year2012, select = common_cols), 
+  subset(year2013, select = common_cols)
+)
+
+common_cols2 <- intersect(colnames(test), colnames(year2014))
+final1 <- rbind(
+  subset(test, select = common_cols2), 
+  subset(year2014, select = common_cols2)
+)
+```
+```{r}
+##create data for modeling
+
+final <- final1
+
+final$number <- as.numeric(gsub(",", "", final$number))
+final <- final[,-(ncol(final))] 
+
+final$publicAssistance <- final$publicAssistance/final$population
+final$number <- final$number/final$population
+
+for (column.name in names(final) [28:57]) {
+  final[column.name] = final[column.name] / final$admit
+}
+
+final$admit <- final$admit/final$population
+
+for (column.name in names(final) [59:ncol(final)]) {
+  final[column.name] = final[column.name] / final$availableService
+}
+
+final$availableService <- final$availableService/final$population
+
+
+final <- final[,-2]
+```
+```{r}
+
+dfForTree <- final
+
+dfScale <- final
+
+dfScale <- dfScale[ , -which(names(dfScale) %in% c("population", "LANG1", "LANG161",
+                                                   "LANG11", "LANG21", "LANG31", "LANG41", 
+                                                   "LANG51", "LANG61", "LANG71", "LANG81",
+                                                   "LANG91", "LANG101", "LANG121", "LANG141",
+                                                   "LANG131", "LANG151", "LANG161", "LANG171",
+                                                   "LANG181", "LANG191", "LANG201"))]
+
+dfScale[,2:ncol(dfScale)] <- scale(dfScale[,2:ncol(dfScale)])
+
+library("devtools")
+#install_github("kassambara/factoextra")
+library("factoextra")
+```
+```{r}
+
+##pc comp
+
+pcAll <- princomp(dfScale[,2:ncol(dfScale)], cor=TRUE, scores=TRUE)
+fviz_pca_biplot(pcAll)
+
+pcCensus <- princomp(dfScale[,2:24], cor=TRUE, scores=TRUE)
+fviz_pca_biplot(pcCensus)
+
+```
+```{r}
+
+##ML REGRESSION
+library(MASS)
+set.seed(1234)
+dfScaleSamp <- dfScale[sample(nrow(dfScale)),]
+dfTrain <- dfScaleSamp[1:122,]
+dfTest <- dfScaleSamp[123:152,]
+
+modelDF <- dfTrain
+modelDF$number <- scale(modelDF$number)
+ownership <- lm(number ~ OWNERSHP2 + OWNERSHP3 +
+                  OWNERSHP4 + OWNERSHP5 + OWNERSHP6, dfScale[,-1])
+model <- lm(number ~., dfScale[,-1])
+fit2 <- stepAIC(model,direction="both")
+
+
+
+modelResid <- resid(fit2)
+
+plot(dfScale$number, modelResid, 
+     ylab="Residuals", xlab="Level", 
+     main="Level of Drug Overdose Residuals") 
+abline(0, 0)
+
+RMSE <- function(error) { sqrt(mean(error^2)) }
+
+predictScaledDeath <- predict(fit2, dfTest)
+rmseML <- sqrt(mean((predictScaledDeath - dfTest$number)^2))
+```
+```{r}
+##CART + RANDOM FOREST
+dfForTree$number <- scale(dfForTree$number)
+
+w <- ifelse(dfForTree$number <= -1.5, "extremely low",
+            ifelse((dfForTree$number >= -1.5) & (dfForTree$number <= 0), "low/medium",
+                   ifelse((dfForTree$number >= 0) & (dfForTree$number <= 1.5), "medium/high",
+                          "high")))
+dfForTree$deathBucket <- w
+
+x <- dfForTree[ , -which(names(dfForTree) %in% c("state", "number", "population", "REVCHK11"))]
+
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+set.seed(4543)
+x$deathBucket <- factor(x$deathBucket) 
+db.rf <- randomForest(deathBucket ~ ., data=x, ntree=1000, keep.forest=FALSE,
+                          importance=TRUE)
+varImpPlot(db.rf)
+
+fitDT1<-rpart(deathBucket~.,data=x)
+
+fitDT2<-rpart(deathBucket~.,data=x,control=rpart.control(cp=0.001),xval=20) 
+
+fitDT3<-rpart(deathBucket~.,data=x,                   
+             parms=list(split="information"),   #can change to information gain
+             control=rpart.control(xval=20)  )
+censusX <- x[, 1:23]
+censusX$deathBucket <- x$deathBucket
+fitCensus <- rpart(deathBucket~.,data=censusX)
+```
+```{r}
+##Low vs. High Death Rate States Exploartory Analysis
+
+final1$number <- as.numeric(gsub(",", "", final1$number))
+final1 <- final1[,-(ncol(final1))] 
+
+final1$publicAssistance <- final1$publicAssistance/final1$population
+final1$number <- final1$number/final1$population
+
+for (column.name in names(final1) [28:57]) {
+  final1[column.name] = final1[column.name] / final1$admit
+}
+
+final1$admit <- final1$admit/final1$population
+
+for (column.name in names(final1) [59:ncol(final1)]) {
+  final1[column.name] = final1[column.name] / final1$availableService
+}
+
+final1$availableService <- final1$availableService/final1$population
+
+
+final1 <- final1[,-2]
+
+finalCensus <- final1[,2:26]
+finalCensus <- finalCensus[,-22]
+finalCensus <- scale(finalCensus)
+
+pc <- princomp(finalCensus, cor=TRUE, scores=TRUE)
+fviz_pca_biplot(pc)
+```
+```{r}
+##exploratory analysis ggplots
+
+exp <- final1
+exp$number <- scale(exp$number)
+w <- ifelse(exp$number <= -1, "low", ifelse((exp$number >= -1) & (exp$number <= 1), "medium",
+                                        "high"))
+exp$number <- w
+exp <- exp[exp$number != "medium",]
+ggplot(exp, aes(publicAssistance, colour = number)) + geom_density()
+ggplot(exp, aes(unemployed, colour = number)) + geom_density()
+ggplot(exp, aes(publicAssistance, colour = number)) + geom_density()
+ggplot(exp, aes(hsNoDiploma, colour = number)) + geom_density()
+ggplot(exp, aes(medianIncome, colour = number)) + geom_density()
+ggplot(exp, aes(percent_black, colour = number)) + geom_density()
+ggplot(exp, aes(SUB13, colour = number)) + geom_density()
+ggplot(exp, aes(SUB15, colour = number)) + geom_density()
+ggplot(exp, aes(SUB114, colour = number)) + geom_density()
+ggplot(exp, aes(LOC51, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPEHI21, colour = number)) + geom_density()
+ggplot(exp, aes(FEESCALE1, colour = number)) + geom_density()
+ggplot(exp, aes(SRVC1161, colour = number)) + geom_density()
+ggplot(exp, aes(admit, colour = number)) + geom_density()
+ggplot(exp, aes(availableService, colour = number)) + geom_density()
+ggplot(exp, aes(OWNERSHP3, colour = number)) + geom_density()
+
+#USE
+ggplot(exp, aes(DETOX1, colour = number)) + geom_density()
+ggplot(exp, aes(LOC51, colour = number)) + geom_density()
+ggplot(exp, aes(SRVC711, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPE41, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPEHI11, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPEHI21, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPE71, colour = number)) + geom_density()
+ggplot(exp, aes(CTYPE21, colour = number)) + geom_density()
+```
+```{r}
+##Various analysis (not used in project)
+subs <- final1
+subs$number <- scale(subs$number)
+w <- ifelse(subs$number <= -1, "low", ifelse((subs$number >= -1) & (subs$number <= 1), "medium",
+                                            "high"))
+subs$number <- w
+
+high <- subs[subs$number == "high",3:140]
+summedHi <- high %>% group_by(number) %>% summarise_all(funs(sum))
+summedHI <- summedHi[,27:56]
+
+for (column.name in names(summedHI) [1:29]) {
+  summedHI[column.name] = summedHI[column.name] / summedHI$admit
+}
+library(reshape2)
+nopriHi <- summedHI[,1:5]
+noPriHi = melt(nopriHi)
+noPriHi = noPriHi[order(noPriHi$variable),] 
+library(plotly)
+
+
+subHi <- summedHI[,6:24]
+subHi = melt(subHi)
+subHi = subHi[order(subHi$variable),]
+freqHi <- summedHI[,25:29]
+freqHi = melt(freqHi)
+freqHi = freqHi[order(freqHi$variable),]
+
+
+
+low <- subs[subs$number == "low",3:140]
+summedLow <- low %>% group_by(number) %>% summarise_all(funs(sum))
+summedLOW <- summedLow[,27:56]
+
+for (column.name in names(summedLOW) [1:29]) {
+  summedLOW[column.name] = summedLOW[column.name] / summedLOW$admit
+}
+
+nopriLOW <- summedLOW[,1:5]
+nopriLOW = melt(nopriLOW)
+nopriLOW = nopriLOW[order(nopriLOW$variable),] 
+
+subLOW <- summedLOW[,6:24]
+subLOW = melt(subLOW)
+subLOW = subLOW[order(subLOW$variable),] 
+
+freqLOW <- summedLOW[,25:29]
+freqLOW = melt(freqLOW)
+freqLOW = freqLOW[order(freqLOW$variable),] 
+
+prior1 <- c("None", "Alcohol", "Cocaine",
+           "Marijuana", "Heroin", "Methadone",
+           "Other Opiates")
+HI <- subHi[1:7,]$value
+LOW <- subLOW[1:7,]$value
+data <- data.frame(prior1, HI, LOW)
+
+z <- plot_ly(data, x = ~prior1, y = ~HI, type = 'bar', name = 'High Rates') %>%
+  add_trace(y = ~LOW, name = 'Low Rates') %>%
+  layout(yaxis = list(title = 'Count'), barmode = 'group')
+
+prior1 <- c("None in Past Month",
+            "1-3 in Past Month",
+            "1-2 in Past Week",
+            "3-6 in Past Week", 
+            "Daily")
+HI <- freqHi$value
+LOW <- freqLOW$value
+data <- data.frame(prior1, HI, LOW)
+
+z <- plot_ly(data, x = ~prior1, y = ~HI, type = 'bar', name = 'High Rates') %>%
+  add_trace(y = ~LOW, name = 'Low Rates') %>%
+  layout(yaxis = list(title = 'Count'), barmode = 'group')
+
+
+```
+```{r}
+#2015 NSSATS analysis
+nssats2015 <- merge(census2015, deathData2015)
+nssats2015 <- merge(nssats2015, nsafd2015)
+nssats2015 <- nssats2015[,-c(27, 28, 29)]
+
+nssats2015$number <- as.numeric(gsub(",", "", nssats2015$number))
+
+for (column.name in names(nssats2015) [27:ncol(nssats2015)]) {
+  nssats2015[column.name] = nssats2015[column.name] / nssats2015$population
+}
+
+nssats2015$publicAssistance <- nssats2015$publicAssistance/nssats2015$population
+
+nsScale <- nssats2015[,3:27]
+nsScale <- scale(nsScale)
+nsScale <- nsScale[ , -22]
+row.names(nsScale) <- nssats2015[,1]
+
+pc <- princomp(nsScale, cor=TRUE, scores=TRUE)
+fviz_pca_biplot(pc)
+
+
+nssats2015 <- nssats2015[,-2]
+
+nssats2015$number <- scale(nssats2015$number)
+
+w <- ifelse(nssats2015$number <= -1.0, "extremely low",
+            ifelse((nssats2015$number >= -1.0) & (nssats2015$number <= 0), "low/medium",
+                   ifelse((nssats2015$number >= 0) & (nssats2015$number <= 1.0), "medium/high",
+                          "high")))
+nssats2015$deathBucket <- w
+
+x <- nssats2015[ , -which(names(nssats2015) %in% c("state", "number", "population"))]
+##CART for 2015
+library(rpart)
+fitDT<-rpart(deathBucket~.,data=x)
+
+fitDT<-rpart(deathBucket~.,data=x,control=rpart.control(cp=0.001),xval=20) 
+
+fitDT<-rpart(deathBucket~.,data=x,                   
+             parms=list(split="information"),   #can change to information gain
+             control=rpart.control(xval=20)  )
+
+
+
+
+
+
